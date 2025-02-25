@@ -2,27 +2,38 @@ import re
 from collections import defaultdict
 
 def parse_verilog(verilog_code):
-    """Extracts module connections from Verilog code"""
+    """Extracts module connections and specifically tracks carry propagation."""
     connections = []
+    
+    # Regex pattern to match module instantiations
     gate_pattern = re.compile(r"(\w+)\s+(\w+)\s*\((.*?)\);")
     
     for match in gate_pattern.finditer(verilog_code):
         gate_type, gate_name, ports = match.groups()
         port_list = [p.strip().split('(')[-1].strip(')') for p in ports.split(',')]
-        if len(port_list) > 1:
-            for i in range(len(port_list) - 1):
-                connections.append((port_list[i], port_list[i + 1]))
-    
+
+        # Ensure we only process full adders
+        if gate_type == "full_adder" and len(port_list) == 5:
+            A, B, Cin, Sum, Cout = port_list
+            connections.append((A, Sum))   # Sum output depends on A
+            connections.append((B, Sum))   # Sum output depends on B
+            connections.append((Cin, Sum)) # Sum output depends on Cin
+            connections.append((Cin, Cout)) # Carry-out depends on carry-in
+            connections.append((A, Cout))  # Carry-out depends on A
+            connections.append((B, Cout))  # Carry-out depends on B
+            
     return connections
 
 def compute_critical_path(verilog_code):
-    """Computes the longest combinational depth manually"""
+    """Computes the longest combinational depth considering carry propagation."""
     connections = parse_verilog(verilog_code)
     graph = defaultdict(list)
-    
+
+    # Build the directed graph
     for src, dst in connections:
         graph[src].append(dst)
-    
+
+    # DFS function to compute depth
     def get_depth(node, memo={}):
         if node in memo:
             return memo[node]
@@ -30,7 +41,8 @@ def compute_critical_path(verilog_code):
             return 0
         memo[node] = 1 + max((get_depth(neigh, memo) for neigh in graph[node]), default=0)
         return memo[node]
-    
+
+    # Compute the longest path in the graph
     max_depth = max((get_depth(node) for node in graph), default=0)
     return max_depth
 
